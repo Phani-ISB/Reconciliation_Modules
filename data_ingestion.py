@@ -126,10 +126,12 @@ def preprocess(df : pd.DataFrame, mapping : dict, source_label: str = "Data") ->
 
     # 3. Unified Narration Field
     try :
-      narration = [df[c].astype(str).str.strip() for c in narration_cols]
+      #narration = [df[c].astype(str).str.strip() for c in narration_cols]
       df["_Narration"] = (
-          pd.concat(narration, axis =1)
-          .apply(lambda row :" ".join(v for v in row if v not in ("nan", "","None")), axis=1)
+          df[narration_cols]
+          .fillna("")
+          .astype(str)
+          .apply(lambda row :" ".join(v.strip() for vin row if v.strip() not in ("","nan", "NaN","None")), axis=1)
           .str.lower()
           .str.strip()
       )
