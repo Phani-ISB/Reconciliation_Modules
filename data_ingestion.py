@@ -113,8 +113,7 @@ def preprocess(df : pd.DataFrame, mapping : dict, source_label: str = "Data") ->
 
     # 1. Parse the Date column
     try:
-      df["_Date"] = pd.to_datetime(df[date_col], infer_datetime_format= True,
-                                   dayfirst = True, errors = "coerce")
+      df["_Date"] = pd.to_datetime(df[date_col],dayfirst = True, errors = "coerce")
     except Exception as exc :
       return None, f"{source_label} : Error parsing Date column '{date_col}': {str(exc)}"
 
