@@ -131,7 +131,9 @@ def preprocess(df : pd.DataFrame, mapping : dict, source_label: str = "Data") ->
           df[narration_cols]
           .fillna("")
           .astype(str)
-          .apply(lambda row :" ".join(v.strip() for vin row if v.strip() not in ("","nan", "NaN","None")), axis=1)
+          .apply(lambda row :" ".join(
+              str(v).strip() for v in row if pd.notna(v) and str(v).strip().lower() not in ("","nan","none")
+          ), axis=1)
           .str.lower()
           .str.strip()
       )
