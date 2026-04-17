@@ -39,9 +39,9 @@ def load_file(contents: str, filename : str):
         if file_name.endswith(".csv") :
             df = pd.read_csv(file_buffer, encoding ="utf-8")
         elif file_name.endswith(".xlsx") :
-            df = pd.read_excel(file_buffer, encoding="openpyxl")
+            df = pd.read_excel(file_buffer, engine = "openpyxl")
         elif file_name.endswith(".xls") :
-            df = pd.read_excel(file_buffer, encoding = "xlrd")
+            df = pd.read_excel(file_buffer, engine = "xlrd")
         else :
             return None, f"Unsupported File Type : '{filename}' . Please upload csv, xls or xlsx file."
 
