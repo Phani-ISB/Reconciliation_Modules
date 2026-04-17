@@ -310,7 +310,7 @@ tab_rules = html.Div([
     ]),
     html.Div(id="rules-status", className="mb-2"),
     dbc.Button("▶  Run Reconciliation", id="btn-run-recon", color="primary",
-               size="lg", className="w-100", disabled=True),
+               size="lg", className="w-100", disabled=False),
     dbc.Progress(id="recon-progress", value=0, style={"height": "6px", "marginTop": "10px"}),
 ], style={"padding": "16px"})
 
