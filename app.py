@@ -310,7 +310,7 @@ tab_rules = html.Div([
     ]),
     html.Div(id="rules-status", className="mb-2"),
     dbc.Button("▶  Run Reconciliation", id="btn-run-recon", color="primary",
-               size="lg", className="w-100"),
+               size="lg", className="w-100", disabled = True),
     dbc.Progress(id="recon-progress", value=0, style={"height": "6px", "marginTop": "10px"}),
 ], style={"padding": "16px"})
 
@@ -746,9 +746,14 @@ def run_reconciliation(n_clicks, l_clean, b_clean, enabled_rules,
     Main reconciliation callback.
     Reads cleaned DataFrames from stores, runs the engine, saves results back.
     """
-    if not n_clicks or l_clean is None or b_clean is None:
-        return no_update, no_update, no_update, no_update, no_update, no_update
-
+    if not n_clicks:
+               return no_update, no_update, no_update, no_update, no_update, no_update
+    if l_clean is None or b_clean is None:
+               warn = dbc.Alert(
+                          "⚠️ No preprocessed data found. Go to Data Ingestion tab and click Confirm Mapping first.",
+        color="warning", style={"fontSize": "0.84rem", "padding": "8px 12px"}
+               )
+               return no_update, no_update, no_update, no_update, no_update, warn                        
     try:
         l_df = store_to_df(l_clean)
         b_df = store_to_df(b_clean)
