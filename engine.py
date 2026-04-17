@@ -68,31 +68,31 @@ def _build_rule_funcs(params : dict) -> dict :
 
   return {
         "narration_exact": lambda l, b: (
-            _narration_exact(l["_Narration"], b["_Narration"])
+            narration_exact(l["_Narration"], b["_Narration"])
         ),
         "narration_fuzzy": lambda l, b: (
-            _narration_exact(l["_Narration"], b["_Narration"]) or
-            _narration_fuzzy(l["_Narration"], b["_Narration"], ft)
+            narration_exact(l["_Narration"], b["_Narration"]) or
+            narration_fuzzy(l["_Narration"], b["_Narration"], ft)
         ),
         "narration_date_exact": lambda l, b: (
-            _narration_exact(l["_Narration"], b["_Narration"]) and
-            _date_exact(l["_Date"], b["_Date"])
+            narration_exact(l["_Narration"], b["_Narration"]) and
+            date_exact(l["_Date"], b["_Date"])
         ),
         "narration_date_range": lambda l, b: (
-            _narration_exact(l["_Narration"], b["_Narration"]) and
-            _date_range(l["_Date"], b["_Date"], dt)
+            narration_exact(l["_Narration"], b["_Narration"]) and
+            date_range(l["_Date"], b["_Date"], dt)
         ),
         "narration_fuzzy_date_range": lambda l, b: (
-            (_narration_exact(l["_Narration"], b["_Narration"]) or
-             _narration_fuzzy(l["_Narration"], b["_Narration"], ft)) and
-            (_date_exact(l["_Date"], b["_Date"]) or
-             _date_range(l["_Date"], b["_Date"], dt))
+            (narration_exact(l["_Narration"], b["_Narration"]) or
+             narration_fuzzy(l["_Narration"], b["_Narration"], ft)) and
+            (date_exact(l["_Date"], b["_Date"]) or
+             date_range(l["_Date"], b["_Date"], dt))
         ),
         "date_exact": lambda l, b: (
-            _date_exact(l["_Date"], b["_Date"])
+            date_exact(l["_Date"], b["_Date"])
         ),
         "date_range": lambda l, b: (
-            _date_range(l["_Date"], b["_Date"], dt)
+            date_range(l["_Date"], b["_Date"], dt)
         ),
     }
 
