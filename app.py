@@ -633,7 +633,7 @@ def upload_bank(contents, filename):
 
 @app.callback(
     Output("btn-proceed-rules", "disabled"),
-    Output("mapping-status",    "children"),
+    Output("rules-status",    "children"),
     Input("store-ledger-raw",  "data"),
     Input("store-bank-raw",    "data"),
     Input("ledger-date",       "value"),
