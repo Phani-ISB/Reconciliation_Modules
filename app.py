@@ -698,7 +698,9 @@ def proceed_to_rules(n, l_raw, b_raw, l_date, l_amt, l_nar, b_date, b_amt, b_nar
 
     l_clean, l_err = preprocess(l_df, l_mapping, "Ledger")
     b_clean, b_err = preprocess(b_df, b_mapping, "Bank")
-
+    print(f"[DEBUG] l_err = {l_err}")  
+    print(f"[DEBUG] b_err = {b_err}")       
+           
     if l_err or b_err:
         # If preprocessing fails, stay on current tab — errors shown elsewhere
         return no_update, no_update, "subtab-ingestion", True
