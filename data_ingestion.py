@@ -119,7 +119,7 @@ def preprocess(df : pd.DataFrame, mapping : dict, source_label: str = "Data") ->
 
     # 2. Parse the Amount column
     try:
-      df["Amount"] = pd.to_numeric(df[amount_col], errors ="coerce").fillna(0.0)
+      df["_Amount"] = pd.to_numeric(df[amount_col], errors ="coerce").fillna(0.0)
 
     except Exception as exc :
       return None, f"{source_label} : Error parsing Amount column '{amount_col}': {str(exc)}"
