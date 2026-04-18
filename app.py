@@ -736,7 +736,16 @@ def toggle_all_rules(enable_n, disable_n):
 
 
 # Run Reconciliation
-
+# Callback for progress of reconciliation
+@app.callback(
+    Output("recon-progress", "value", allow_duplicate=True),
+    Input("btn-run-recon", "n_clicks"),
+    prevent_initial_call=True,
+)
+def reset_progress(n):
+    return 10
+           
+# Callback for actual reconciliation          
 @app.callback(
     Output("store-results-ledger", "data"),
     Output("store-results-bank",   "data"),
