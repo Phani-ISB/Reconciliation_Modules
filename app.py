@@ -280,8 +280,8 @@ tab_rules = html.Div([
         dbc.Col(card([
             section_header("⚙️ Reconciliation Parameters"),
             html.Label("📅 Date Tolerance (days)", style={"fontSize": "0.82rem", "fontWeight": "600"}),
-            dcc.Slider(id="kpi-date-tol", min=0, max=30, step=1, value=DATE_TOLERANCE,
-                       marks={i: str(i) for i in range(0, 31, 5)},
+            dcc.Slider(id="kpi-date-tol", min=0, max=120, step=1, value=DATE_TOLERANCE,
+                       marks={i: str(i) for i in range(0, 121, 10)},
                        tooltip={"placement": "bottom", "always_visible": True}),
             html.Br(),
             html.Label("💰 Amount Tolerance", style={"fontSize": "0.82rem", "fontWeight": "600"}),
