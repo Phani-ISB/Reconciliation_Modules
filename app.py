@@ -312,7 +312,15 @@ tab_rules = html.Div([
     html.Div(id="rules-status", className="mb-2"),
     dbc.Button("▶  Run Reconciliation", id="btn-run-recon", color="primary",
                size="lg", className="w-100", disabled = True),
-    dbc.Progress(id="recon-progress", value=0, style={"height": "6px", "marginTop": "10px"}),
+    dbc.Progress(id="recon-progress", 
+                 value=0, 
+                 animated = True, striped = True, style={"height": "10px", "marginTop": "10px",
+                                                        "transition": "width 0.4s ease"},
+                 className = "mb-2",
+                ),
+    html.Div(id = "progress-label", 
+             style={"fontSize": "0.78rem", "color": COLOR["muted"],
+                "textAlign": "center", "marginBottom": "8px"}),
 ], style={"padding": "16px"})
 
 
@@ -548,12 +556,14 @@ app.layout = html.Div([
     ], style={"fontFamily": "Inter, Segoe UI, sans-serif"}),
 
     # Stores all the details from dataframe via json for active session
-    dcc.Store(id="store-ledger-raw"),      # raw loaded ledger (list of records)
-    dcc.Store(id="store-bank-raw"),        # raw loaded bank
-    dcc.Store(id="store-ledger-cols"),     # column names list for ledger dropdowns
-    dcc.Store(id="store-bank-cols"),       # column names list for bank dropdowns
-    dcc.Store(id="store-ledger-clean"),    # preprocessed ledger after mapping
-    dcc.Store(id="store-bank-clean"),      # preprocessed bank after mapping
+    dcc.Store(id="store-ledger-raw"),                 # raw loaded ledger (list of records)
+    dcc.Store(id="store-bank-raw"),                   # raw loaded bank
+    dcc.Store(id="store-ledger-cols"),                # column names list for ledger dropdowns
+    dcc.Store(id="store-bank-cols"),                  # column names list for bank dropdowns
+    dcc.Store(id="store-ledger-clean"),               # preprocessed ledger after mapping
+    dcc.Store(id="store-bank-clean"),                 # preprocessed bank after mapping
+    dcc.Store(id="store-recon-running", data=False),  # For progress bar           
+    dcc.Interval(id="interval-progress", interval=400, n_intervals=0, disabled=True),       
     dcc.Store(id="store-results-ledger"),  # reconciled ledger
     dcc.Store(id="store-results-bank"),    # reconciled bank
     dcc.Store(id="store-rule-summary"),    # rule summary DataFrame
@@ -734,6 +744,7 @@ def toggle_all_rules(enable_n, disable_n):
     Output("store-ai-context",     "data"),
     Output("bank-subtabs",         "active_tab", allow_duplicate=True),
     Output("rules-status",         "children"),
+    Output("recon-progress", "value", allow_duplicate=True),       
     Input("btn-run-recon", "n_clicks"),
     State("store-ledger-clean",  "data"),
     State("store-bank-clean",    "data"),
@@ -750,13 +761,13 @@ def run_reconciliation(n_clicks, l_clean, b_clean, enabled_rules,
     Reads cleaned DataFrames from stores, runs the engine, saves results back.
     """
     if not n_clicks:
-               return no_update, no_update, no_update, no_update, no_update, no_update
+               return no_update, no_update, no_update, no_update, no_update, no_update, 0
     if l_clean is None or b_clean is None:
                warn = dbc.Alert(
                           "⚠️ No preprocessed data found. Go to Data Ingestion tab and click Confirm Mapping first.",
         color="warning", style={"fontSize": "0.84rem", "padding": "8px 12px"}
                )
-               return no_update, no_update, no_update, no_update, no_update, warn                        
+               return no_update, no_update, no_update, no_update, no_update, warn, 0                        
     try:
         l_df = store_to_df(l_clean)
         b_df = store_to_df(b_clean)
@@ -790,12 +801,13 @@ def run_reconciliation(n_clicks, l_clean, b_clean, enabled_rules,
                 rule_summary.to_dict("records"),
                 ai_context,
                 "subtab-results",
-                status_msg)
+                status_msg,
+                100)
 
     except Exception as exc:
         err_msg = dbc.Alert(f"❌ Error: {str(exc)}", color="danger",
                             style={"fontSize": "0.84rem", "padding": "8px 12px"})
-        return no_update, no_update, no_update, no_update, no_update, err_msg
+        return no_update, no_update, no_update, no_update, no_update, err_msg, 0
 
 
 # RESULTS TAB
