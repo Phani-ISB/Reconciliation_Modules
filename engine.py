@@ -120,7 +120,7 @@ def _tag_internal_duplicates(df: pd.DataFrame, group_start: int) -> tuple:
     df = df.copy()
 
     # Represent every row as a concatenation of all cell values for duplicate check
-    row_signature = df.astype(str).agg("|".join, axis=1)
+    row_signature = df.apply(lambda row: "|".join(map(str, row)),axis=1)
 
     # Finding all rows that have at least one duplicate somewhere
     duplicated_mask = row_signature.duplicated(keep=False)
