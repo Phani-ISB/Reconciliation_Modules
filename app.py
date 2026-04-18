@@ -20,6 +20,7 @@ import io
 import json
 import base64
 import traceback
+import time
 
 # Dashboard Library used : Plotly Dash
 
@@ -765,11 +766,11 @@ def run_reconciliation(n_clicks, l_clean, b_clean, enabled_rules,
             "amount_tolerance": float(amount_tol or AMOUNT_TOLERANCE),
             "fuzzy_threshold" : int(fuzzy_tol   or FUZZY_THRESHOLD),
         }
-
+        time.sleep(0.5)  # For each rule (effective for online deployment)   
         l_out, b_out, _match_log, rule_summary = run_full_reconciliation(
             l_df, b_df, params, enabled_rules or []
         )
-
+        time.sleep(0.5)  # For each rule (effective for online deployment)   
         # Build AI context string now so it's ready when user opens AI tab
         ai_context = build_ai_context(l_out, b_out, rule_summary, params)
 
