@@ -205,7 +205,7 @@ class AIAgent:
 
 
     # Ensure specific LLM package is installed
-    def _require_package(package_name: str, install_cmd: str):
+    def _require_package(self, package_name: str, install_cmd: str):
         
         try:
             return importlib.import_module(package_name)
