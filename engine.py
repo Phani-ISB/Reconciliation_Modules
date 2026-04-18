@@ -214,8 +214,8 @@ def _run_one_to_one_rules(
             # First Filter with Amount Tolerance
             amt_series = pd.to_numeric(b_unmatched["_Amount"], errors ="coerce")
             mask = (amt_series - float(ledger_amount)).abs() <= float(at)
-            mask = mask.fillna(False).to_numpy()
-            candidates = b_unmatched.iloc[mask]
+            mask = mask.fillna(False)
+            candidates = b_unmatched.loc[mask]
 
             if candidates.empty:
                 continue
