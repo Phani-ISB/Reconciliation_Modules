@@ -209,9 +209,9 @@ def _run_one_to_one_rules(
             ledger_amount = lrow["_Amount"]
 
             # First Filter with Amount Tolerance
-            candidates = b_unmatched[
-                abs(b_unmatched["_Amount"] - ledger_amount) <= at
-            ]
+            amt_series = pd.to_numeric(b_unmatched["_Amount"], errors ="coerce")
+            mask = (amt_series - float(ledger_amount)).abs() <= float(at)
+            candidates = b_unmatched.loc[mask.fillna(False)]
 
             if candidates.empty:
                 continue
