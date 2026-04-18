@@ -204,16 +204,18 @@ def _run_one_to_one_rules(
 
         rule_fn = rule_funcs[rule_key]
 
-        l_unmatched = ledger_df[~ledger_df["Matched"]]
-        b_unmatched = bank_df[~bank_df["Matched"]]
+        l_unmatched = ledger_df.loc[ledger_df["Matched"] == False]
+        b_unmatched = bank_df.loc[bank_df["Matched"] == False]
 
         for li, lrow in l_unmatched.iterrows():
-            ledger_amount = lrow["_Amount"]
-
+            ledger_amount = pd.to_numeric(lrow["_Amount"] , errors ="coerce")
+            if pd.isna(ledger_amount) :
+                continue
             # First Filter with Amount Tolerance
             amt_series = pd.to_numeric(b_unmatched["_Amount"], errors ="coerce")
             mask = (amt_series - float(ledger_amount)).abs() <= float(at)
-            candidates = b_unmatched.loc[mask.fillna(False)]
+            mask = mask.fillna(False).to_numpy()
+            candidates = b_unmatched.iloc[mask]
 
             if candidates.empty:
                 continue
@@ -257,7 +259,7 @@ def _run_one_to_one_rules(
             gid += 1
 
             # Unmatched transactions
-            b_unmatched = bank_df[~bank_df["Matched"]]
+            b_unmatched = bank_df.loc[bank_df["Matched"] == False]
 
     return match_log, gid
 
