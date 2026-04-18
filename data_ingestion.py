@@ -101,12 +101,16 @@ def preprocess(df : pd.DataFrame, mapping : dict, source_label: str = "Data") ->
 
     date_col = mapping.get("date_col")
     amount_col = mapping.get("amount_col")
-    narration_cols = mapping.get("narration_cols")
+    narration_cols = mapping.get("narration_cols") or []
+    # Ensure narration columns as list
+    if not isinstance(narration_cols, list):
+        narration_cols = [narration_cols]
+    narration_cols = [str(c) for c in narration_cols if pd.notna(c)]    
 
     # Check missing columns any in DataFrame
     missing = [c for c in [date_col, amount_col] + narration_cols if c not in df.columns]
     if missing :
-        return None, f"{source_label} : Missing Columns : {', '.join(missing)}"
+        return None, f"{source_label} : Missing Columns : {', '.join(map(str,missing))}"
 
     # Copy the DataFrame to carryout preprocessing steps
     df = df.copy()
