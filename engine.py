@@ -184,7 +184,9 @@ def _run_one_to_one_rules(
     at = float(params.get("amount_tolerance", 0.0))
     match_log = []
     gid = start_gid
-
+    ledger_df["Matched"] = ledger_df["Matched"].fillna(False).astype(bool)
+    bank_df["Matched"]   = bank_df["Matched"].fillna(False).astype(bool)
+    
     ONE_TO_ONE_RULE_KEYS = [
         "narration_exact",
         "narration_fuzzy",
