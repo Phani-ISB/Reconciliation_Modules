@@ -42,9 +42,18 @@ from config import(
     DATE_TOLERANCE, AMOUNT_TOLERANCE, FUZZY_THRESHOLD,
 )
 
-from data_ingestion import load_file, preprocess, get_column_options, df_to_store, store_to_df
-from engine import run_full_reconciliation, get_unreconciled, get_manual_review_items
-from inferences import compute_totals, compute_reconciliation_summary, compute_currency_summary, compute_amount_diff_summary, build_ai_context
+from data_ingestion import (
+    load_file, preprocess, preprocess_ic, get_column_options,
+    df_to_store, store_to_df, df_to_store_ic, store_to_df_ic
+)
+from engine import (
+    run_full_reconciliation, get_unreconciled, get_manual_review_items,
+    run_ic_reconciliation, get_ic_unmatched, get_ic_review_items, get_ic_entity_matrix
+)
+from inferences import (
+    compute_totals, compute_reconciliation_summary, compute_currency_summary,
+    compute_amount_diff_summary, build_ai_context
+)
 from ai_agent import AIAgent
 
 
@@ -491,7 +500,146 @@ tab_ai_agent = html.Div([
 
 ], style={"padding": "16px"})
 
-###----------------------------------------------------------------------------------------------------------------###
+###################################################################################################################
+# INTER-COMPANY RECONCILIATION TABS
+
+# IC Data Ingestion Tab
+tab_data_ingestion_ic = html.Div([
+    dbc.Row([
+        dbc.Col(upload_block("📄 IC Master Data File", "upload-ic", "preview-ic"), width=12),
+    ]),
+    mapping_block("IC Data", "ic-date", "ic-amount", "ic-narration"),
+    dbc.Row([
+        dbc.Col([
+            html.Label("🏢 Entity Column *", style={"fontSize": "0.82rem", "fontWeight": "600"}),
+            dcc.Dropdown(id="ic-entity", placeholder="Select entity column...",
+                         style={"fontSize": "0.82rem"}),
+        ], width=6),
+        dbc.Col([
+            html.Label("🤝 Partner Entity Column *", style={"fontSize": "0.82rem", "fontWeight": "600"}),
+            dcc.Dropdown(id="ic-partner", placeholder="Select partner entity column...",
+                         style={"fontSize": "0.82rem"}),
+        ], width=6),
+    ]),
+    html.Div(id="ic-mapping-status", style={"marginBottom": "8px"}),
+    dbc.Button("✅ Confirm Mapping & Proceed to Rules →",
+               id="btn-ic-proceed-rules", color="primary", size="lg",
+               className="w-100", disabled=True),
+], style={"padding": "16px"})
+
+
+# IC Rules & Configuration Tab
+ic_rule_names = [
+    "Narration Exact + Date Exact + Amount Offset",
+    "Narration Fuzzy + Date Exact + Amount Offset",
+    "Narration Exact + Date Range + Amount Offset",
+    "Narration Fuzzy + Date Range + Amount Offset",
+    "Date Exact + Amount Offset",
+    "Amount Offset Only",
+    "Within Company Reversal + Amount Offset",
+    "Multiple Matchings (Manual Review)",
+]
+
+ic_rule_checklist = dbc.Checklist(
+    id="ic-rules-checklist",
+    options=[{"label": rule, "value": rule} for rule in ic_rule_names],
+    value=ic_rule_names,  # all enabled by default
+    style={"fontSize": "0.86rem", "lineHeight": "2"},
+)
+
+tab_rules_ic = html.Div([
+    dbc.Row([
+        dbc.Col(card([
+            section_header("⚙️ IC Reconciliation Parameters"),
+            html.Label("📅 Date Tolerance (days)", style={"fontSize": "0.82rem", "fontWeight": "600"}),
+            dcc.Slider(id="ic-kpi-date-tol", min=0, max=30, step=1, value=DATE_TOLERANCE,
+                       marks={i: str(i) for i in range(0, 31, 5)},
+                       tooltip={"placement": "bottom", "always_visible": True}),
+            html.Br(),
+            html.Label("💰 Amount Tolerance (Offset)", style={"fontSize": "0.82rem", "fontWeight": "600"}),
+            dcc.Input(id="ic-kpi-amount-tol", type="number", value=AMOUNT_TOLERANCE,
+                      min=0, step=0.01, debounce=True,
+                      style={"width": "100%", "padding": "6px", "borderRadius": "4px",
+                             "border": f"1px solid {COLOR['border']}"}),
+            html.Br(), html.Br(),
+            html.Label("🔍 Fuzzy Match Threshold (0–100)", style={"fontSize": "0.82rem", "fontWeight": "600"}),
+            dcc.Slider(id="ic-kpi-fuzzy-tol", min=0, max=100, step=5, value=FUZZY_THRESHOLD,
+                       marks={i: str(i) for i in range(0, 101, 10)},
+                       tooltip={"placement": "bottom", "always_visible": True}),
+        ]), width=5),
+        dbc.Col(card([
+            section_header("📋 IC Reconciliation Rules"),
+            dbc.Row([
+                dbc.Col(dbc.Button("✅ Enable All",  id="btn-ic-enable-all",  color="success",
+                                   size="sm", outline=True, className="me-2"), width="auto"),
+                dbc.Col(dbc.Button("⬜ Disable All", id="btn-ic-disable-all", color="secondary",
+                                   size="sm", outline=True), width="auto"),
+            ], className="mb-3"),
+            ic_rule_checklist,
+        ]), width=7),
+    ]),
+    html.Div(id="ic-rules-status", className="mb-2"),
+    dbc.Button("▶  Run IC Reconciliation", id="btn-ic-run-recon", color="primary",
+               size="lg", className="w-100", disabled=True),
+    dbc.Progress(id="ic-recon-progress", value=0, style={"height": "6px", "marginTop": "10px"}),
+], style={"padding": "16px"})
+
+
+# IC Results Tab
+tab_results_ic = html.Div([
+    dbc.Row(id="ic-results-kpi-row", className="mb-3 g-2"),
+    dbc.Tabs(id="ic-results-subtabs", children=[
+        dbc.Tab(label="✅ Matched Transactions", tab_id="tab-ic-matched", children=[
+            html.Div([
+                dbc.Row([
+                    dbc.Col(dbc.Button("⬇ Download Excel", id="btn-ic-dl-matched",
+                                       color="success", size="sm", outline=True), width="auto"),
+                    dbc.Col(dbc.Button("⬇ Download CSV", id="btn-ic-dl-matched-csv",
+                                       color="secondary", size="sm", outline=True), width="auto"),
+                ], className="mb-2"),
+                dcc.Download(id="dl-ic-matched"),
+                dcc.Download(id="dl-ic-matched-csv"),
+                html.Div(id="table-ic-matched"),
+            ], style={"padding": "12px"}),
+        ]),
+        dbc.Tab(label="❌ Unmatched Transactions", tab_id="tab-ic-unmatched", children=[
+            html.Div([
+                dbc.Row([
+                    dbc.Col(dbc.Button("⬇ Download Excel", id="btn-ic-dl-unmatched",
+                                       color="danger", size="sm", outline=True), width="auto"),
+                ], className="mb-2"),
+                dcc.Download(id="dl-ic-unmatched"),
+                html.Div(id="table-ic-unmatched"),
+            ], style={"padding": "12px"}),
+        ]),
+        dbc.Tab(label="👁️ For Manual Review", tab_id="tab-ic-review", children=[
+            html.Div([
+                html.Div("These transactions had multiple match candidates or complex structures. Review before approval.",
+                         style={"fontSize": "0.84rem", "color": COLOR["warning"],
+                                "marginBottom": "12px", "padding": "8px",
+                                "background": "#fffbeb", "borderRadius": "6px",
+                                "border": f"1px solid {COLOR['warning']}"}),
+                html.Div(id="table-ic-review"),
+            ], style={"padding": "12px"}),
+        ]),
+        dbc.Tab(label="🗺️ Entity Matrix", tab_id="tab-ic-matrix", children=[
+            html.Div([
+                html.Div(
+                    "Summary of reconciled amounts between entity pairs.",
+                    style={"fontSize": "0.84rem", "color": COLOR["muted"], "marginBottom": "12px"}
+                ),
+                html.Div(id="table-ic-matrix"),
+            ], style={"padding": "12px"}),
+        ]),
+        dbc.Tab(label="📊 Rule Summary", tab_id="tab-ic-rules", children=[
+            html.Div([
+                html.Div(id="table-ic-rule-summary"),
+            ], style={"padding": "12px"}),
+        ]),
+    ], active_tab="tab-ic-matched"),
+], style={"padding": "16px"})
+
+###################################################################################################################
 # MAIN LAYOUT & TABS
 
 app.layout = html.Div([
@@ -527,10 +675,15 @@ app.layout = html.Div([
                                 "padding": "12px 20px"},
                 children=[
                     html.Div([
-                        html.Div("🚧  Inter Company Reconciliation module is coming soon.",
-                                 style={"textAlign": "center", "padding": "80px 0",
-                                        "fontSize": "1.1rem", "color": COLOR["muted"]}),
-                    ])
+                        dbc.Tabs(id="ic-subtabs", active_tab="subtab-ic-ingestion", children=[
+                            dbc.Tab(label="📁  Data Ingestion",      tab_id="subtab-ic-ingestion",
+                                    children=tab_data_ingestion_ic),
+                            dbc.Tab(label="⚙️  Rules & Config",      tab_id="subtab-ic-rules",
+                                    children=tab_rules_ic),
+                            dbc.Tab(label="📊  Results",              tab_id="subtab-ic-results",
+                                    children=tab_results_ic),
+                        ], className="mt-0"),
+                    ]),
                 ]),
 
         # Bank Reconciliation Tab
@@ -572,6 +725,16 @@ app.layout = html.Div([
     dcc.Store(id="store-chat-history"),    # list of {role, content} dicts
     dcc.Store(id="store-ai-context"),      # built AI context string
 
+    # IC Reconciliation Stores
+    dcc.Store(id="store-ic-raw"),          # raw IC data
+    dcc.Store(id="store-ic-cols"),         # column names for IC dropdowns
+    dcc.Store(id="store-ic-clean"),        # preprocessed IC data after mapping
+    dcc.Store(id="store-ic-results"),      # reconciled IC data
+    dcc.Store(id="store-ic-matched"),      # matched IC transactions
+    dcc.Store(id="store-ic-unmatched"),    # unmatched IC transactions
+    dcc.Store(id="store-ic-review"),       # IC transactions for review
+    dcc.Store(id="store-ic-rule-summary"), # IC rule summary DataFrame
+
 ], style={"fontFamily": "Inter, Segoe UI, sans-serif",
           "background": COLOR["background"], "minHeight": "100vh"})
 
@@ -604,6 +767,280 @@ def _parse_upload(contents, filename):
     records = df_to_store(df)
     return records, cols, cols, f"✅ Loaded **{filename}** — {len(df):,} rows × {len(df.columns)} columns"
 
+
+###################################################################################################################
+# INTER-COMPANY RECONCILIATION CALLBACKS
+
+# IC File Upload
+@app.callback(
+    Output("store-ic-raw",  "data"),
+    Output("store-ic-cols", "data"),
+    Output("ic-date",       "options"),
+    Output("ic-amount",     "options"),
+    Output("ic-narration",  "options"),
+    Output("ic-entity",     "options"),
+    Output("ic-partner",    "options"),
+    Output("preview-ic",    "children"),
+    Input("upload-ic", "contents"),
+    State("upload-ic", "filename"),
+    prevent_initial_call=True,
+)
+def upload_ic(contents, filename):
+    """Upload IC master data file."""
+    records, cols, _, msg = _parse_upload(contents, filename)
+    preview = dbc.Alert(msg, color="success" if records else "danger",
+                        style={"fontSize": "0.82rem", "padding": "8px 12px"})
+    col_options = cols or []
+    return records, cols, col_options, col_options, col_options, col_options, col_options, preview
+
+
+# IC Mapping Validation
+@app.callback(
+    Output("btn-ic-proceed-rules", "disabled"),
+    Output("ic-mapping-status",    "children"),
+    Input("store-ic-raw",   "data"),
+    Input("ic-date",        "value"),
+    Input("ic-amount",      "value"),
+    Input("ic-narration",   "value"),
+    Input("ic-entity",      "value"),
+    Input("ic-partner",     "value"),
+    prevent_initial_call=True,
+)
+def check_ic_mapping_complete(raw, date_col, amt_col, nar_cols, entity_col, partner_col):
+    """Enable 'Proceed' button when all mandatory IC columns are mapped."""
+    checks = [raw, date_col, amt_col, nar_cols, entity_col, partner_col]
+    if all(c for c in checks):
+        msg = dbc.Alert("✅ All columns mapped. Ready to proceed to Rules.",
+                        color="success", style={"fontSize": "0.82rem", "padding": "8px 12px"})
+        return False, msg
+    missing = []
+    if not raw:           missing.append("Upload IC file")
+    if not date_col:      missing.append("Map Date column")
+    if not amt_col:       missing.append("Map Amount column")
+    if not nar_cols:      missing.append("Map Narration column(s)")
+    if not entity_col:    missing.append("Map Entity column")
+    if not partner_col:   missing.append("Map Partner Entity column")
+    msg = dbc.Alert("⚠️ Remaining: " + " · ".join(missing),
+                    color="warning", style={"fontSize": "0.82rem", "padding": "8px 12px"})
+    return True, msg
+
+
+# IC Preprocessing
+@app.callback(
+    Output("store-ic-clean",  "data"),
+    Output("ic-subtabs",      "active_tab"),
+    Output("btn-ic-run-recon","disabled"),
+    Input("btn-ic-proceed-rules", "n_clicks"),
+    State("store-ic-raw",   "data"),
+    State("ic-date",        "value"),
+    State("ic-amount",      "value"),
+    State("ic-narration",   "value"),
+    State("ic-entity",      "value"),
+    State("ic-partner",     "value"),
+    prevent_initial_call=True,
+)
+def proceed_to_ic_rules(n, ic_raw, date_col, amt_col, nar_cols, entity_col, partner_col):
+    """Preprocess IC data and switch to Rules tab."""
+    if not n:
+        return None, no_update, True
+
+    ic_df = store_to_df_ic(ic_raw)
+    if ic_df is None:
+        return None, no_update, True
+
+    mapping = {
+        "date_col": date_col,
+        "amount_col": amt_col,
+        "narration_cols": nar_cols or [],
+        "entity_col": entity_col,
+        "partner_entity_col": partner_col,
+    }
+
+    ic_clean, err = preprocess_ic(ic_df, mapping, "IC Data")
+    if err:
+        return None, no_update, True
+
+    return df_to_store_ic(ic_clean), "subtab-ic-rules", False
+
+
+# IC Enable/Disable All Rules
+@app.callback(
+    Output("ic-rules-checklist", "value"),
+    Input("btn-ic-enable-all",  "n_clicks"),
+    Input("btn-ic-disable-all", "n_clicks"),
+    prevent_initial_call=True,
+)
+def toggle_all_ic_rules(enable_n, disable_n):
+    """Toggle all IC rules on or off."""
+    triggered = ctx.triggered_id
+    if triggered == "btn-ic-enable-all":
+        return ic_rule_names
+    return []
+
+
+# IC Reconciliation Execution
+@app.callback(
+    Output("store-ic-results",       "data"),
+    Output("store-ic-matched",       "data"),
+    Output("store-ic-unmatched",     "data"),
+    Output("store-ic-review",        "data"),
+    Output("store-ic-rule-summary",  "data"),
+    Output("ic-subtabs",             "active_tab", allow_duplicate=True),
+    Output("ic-rules-status",        "children"),
+    Input("btn-ic-run-recon", "n_clicks"),
+    State("store-ic-clean",   "data"),
+    State("ic-rules-checklist", "value"),
+    State("ic-kpi-date-tol",   "value"),
+    State("ic-kpi-amount-tol", "value"),
+    State("ic-kpi-fuzzy-tol",  "value"),
+    prevent_initial_call=True,
+)
+def run_ic_recon(n_clicks, ic_clean, enabled_rules, date_tol, amt_tol, fuzzy_tol):
+    """Execute IC reconciliation."""
+    if not n_clicks or ic_clean is None:
+        err_msg = dbc.Alert("❌ Error: No clean IC data. Please complete data ingestion.",
+                            color="danger", style={"fontSize": "0.84rem"})
+        return no_update, no_update, no_update, no_update, no_update, no_update, err_msg
+
+    try:
+        ic_df = store_to_df_ic(ic_clean)
+        params = {
+            "date_tolerance": date_tol,
+            "amount_tolerance": amt_tol,
+            "fuzzy_threshold": fuzzy_tol,
+        }
+
+        recon_df, matched_df, unmatched_df, review_df, rule_summary = run_ic_reconciliation(
+            ic_df, params, enabled_rules
+        )
+
+        success_msg = dbc.Alert(
+            f"✅ Reconciliation complete! {len(matched_df)} matched, {len(unmatched_df)} unmatched, {len(review_df)} for review.",
+            color="success", style={"fontSize": "0.84rem", "padding": "8px 12px"}
+        )
+
+        return (
+            df_to_store_ic(recon_df),
+            df_to_store_ic(matched_df),
+            df_to_store_ic(unmatched_df),
+            df_to_store_ic(review_df),
+            rule_summary.to_dict("records") if rule_summary is not None else [],
+            "subtab-ic-results",
+            success_msg
+        )
+    except Exception as exc:
+        err_msg = dbc.Alert(f"❌ Error: {str(exc)}", color="danger",
+                            style={"fontSize": "0.84rem", "padding": "8px 12px"})
+        return no_update, no_update, no_update, no_update, no_update, no_update, err_msg
+
+
+# IC Results Display
+@app.callback(
+    Output("ic-results-kpi-row",   "children"),
+    Output("table-ic-matched",     "children"),
+    Output("table-ic-unmatched",   "children"),
+    Output("table-ic-review",      "children"),
+    Output("table-ic-matrix",      "children"),
+    Output("table-ic-rule-summary","children"),
+    Input("store-ic-matched",      "data"),
+    Input("store-ic-unmatched",    "data"),
+    Input("store-ic-review",       "data"),
+    Input("store-ic-results",      "data"),
+    Input("store-ic-rule-summary", "data"),
+    prevent_initial_call=True,
+)
+def populate_ic_results(matched_data, unmatched_data, review_data, results_data, rule_sum_data):
+    """Display IC reconciliation results in all tabs."""
+    if not results_data:
+        empty = html.Div("Run reconciliation first.", style={"color": COLOR["muted"], "padding": "20px"})
+        return [], empty, empty, empty, empty, empty
+
+    recon_df    = store_to_df_ic(results_data)
+    matched_df  = store_to_df_ic(matched_data)
+    unmatched_df= store_to_df_ic(unmatched_data)
+    review_df   = store_to_df_ic(review_data)
+
+    # KPI Row
+    total_tx      = len(recon_df)    if recon_df    is not None else 0
+    matched_count = len(matched_df)  if matched_df  is not None else 0
+    unmatched_count=len(unmatched_df)if unmatched_df is not None else 0
+    review_count  = len(review_df)   if review_df   is not None else 0
+    match_pct     = round(100 * matched_count / total_tx, 1) if total_tx > 0 else 0
+
+    kpi_row = dbc.Row([
+        kpi_card("Total Transactions", total_tx,       COLOR["accent"],  "📝"),
+        kpi_card("Matched",            matched_count,  COLOR["success"], "✅"),
+        kpi_card("Unmatched",          unmatched_count,COLOR["danger"],  "❌"),
+        kpi_card("For Review",         review_count,   COLOR["warning"], "👁️"),
+        kpi_card("Match %",            f"{match_pct}%",COLOR["success"], "📈"),
+    ], className="mb-2 g-2")
+
+    # Tables
+    matched_table   = table_from_df(matched_df,   "table-ic-matched-dt")   if matched_df   is not None else html.Div("No matched transactions.")
+    unmatched_table = table_from_df(unmatched_df, "table-ic-unmatched-dt") if unmatched_df is not None else html.Div("No unmatched transactions.")
+    review_table    = table_from_df(review_df,    "table-ic-review-dt")    if review_df    is not None else html.Div("No transactions for review.")
+
+    # Entity Matrix
+    entity_matrix = get_ic_entity_matrix(recon_df, "Matched")
+    if entity_matrix is not None:
+        matrix_table = table_from_df(entity_matrix.reset_index(), "table-ic-entity-matrix-dt")
+    else:
+        matrix_table = html.Div("No entity matrix data.")
+
+    # Rule Summary
+    if rule_sum_data:
+        rule_df = pd.DataFrame(rule_sum_data)
+        rule_table = table_from_df(rule_df, "table-ic-rule-sum-dt")
+    else:
+        rule_table = html.Div("No rule summary.")
+
+    return kpi_row, matched_table, unmatched_table, review_table, matrix_table, rule_table
+
+
+@app.callback(
+    Output("dl-ic-matched", "data"),
+    Input("btn-ic-dl-matched", "n_clicks"),
+    State("store-ic-matched", "data"),
+    prevent_initial_call=True,
+)
+def download_ic_matched_excel(n_clicks, data):
+    """Download matched IC transactions as Excel."""
+    if not data:
+        return no_update
+    df = store_to_df_ic(data)
+    return dcc.send_data_frame(df.to_excel, "IC_Matched_Transactions.xlsx", index=False)
+
+
+@app.callback(
+    Output("dl-ic-matched-csv", "data"),
+    Input("btn-ic-dl-matched-csv", "n_clicks"),
+    State("store-ic-matched", "data"),
+    prevent_initial_call=True,
+)
+def download_ic_matched_csv(n_clicks, data):
+    """Download matched IC transactions as CSV."""
+    if not data:
+        return no_update
+    df = store_to_df_ic(data)
+    return dcc.send_data_frame(df.to_csv, "IC_Matched_Transactions.csv", index=False)
+
+
+@app.callback(
+    Output("dl-ic-unmatched", "data"),
+    Input("btn-ic-dl-unmatched", "n_clicks"),
+    State("store-ic-unmatched", "data"),
+    prevent_initial_call=True,
+)
+def download_ic_unmatched_excel(n_clicks, data):
+    """Download unmatched IC transactions as Excel."""
+    if not data:
+        return no_update
+    df = store_to_df_ic(data)
+    return dcc.send_data_frame(df.to_excel, "IC_Unmatched_Transactions.xlsx", index=False)
+
+
+###################################################################################################################
+# BANK RECONCILIATION CALLBACKS
 
 @app.callback(
     Output("store-ledger-raw",  "data"),

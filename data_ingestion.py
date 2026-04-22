@@ -156,6 +156,98 @@ def preprocess(df : pd.DataFrame, mapping : dict, source_label: str = "Data") ->
     return df, None
 
 ###----------------------------------------------------------------------------------------------------------------###
+# INTER-COMPANY RECONCILIATION - Preprocessing
+
+def validate_ic_mapping(mapping : dict) -> tuple :
+    """Validate mapping for Inter-Company reconciliation (requires Entity & PartnerEntity fields)."""
+    date_col = mapping.get("date_col")
+    amount_col = mapping.get("amount_col")
+    entity_col = mapping.get("entity_col")
+    partner_col = mapping.get("partner_entity_col")
+    narration_cols = mapping.get("narration_cols", [])
+
+    if not date_col :
+        return False, "Date Column is mandatory - Please Select it"
+    if not amount_col :
+        return False, "Amount Column is mandatory - Please Select it"
+    if not entity_col :
+        return False, "Entity Column is mandatory - Please Select it"
+    if not partner_col :
+        return False, "Partner Entity Column is mandatory - Please Select it"
+    if not narration_cols :
+        return False, "At least one Narration Column is mandatory - Please Select it"
+
+    return True, None
+
+
+def preprocess_ic(df : pd.DataFrame, mapping : dict, source_label: str = "Data") -> tuple :
+    """Preprocess Inter-Company reconciliation data with Entity and PartnerEntity fields."""
+    # Input guard
+    if df is None or df.empty :
+        return None, f"{source_label} : No data to process"
+
+    ok, err = validate_ic_mapping(mapping)
+    if not ok :
+        return None, f"{source_label} : {err}"
+
+    date_col = mapping.get("date_col")
+    amount_col = mapping.get("amount_col")
+    entity_col = mapping.get("entity_col")
+    partner_col = mapping.get("partner_entity_col")
+    narration_cols = mapping.get("narration_cols", [])
+
+    # Check missing columns in DataFrame
+    required_cols = [date_col, amount_col, entity_col, partner_col] + narration_cols
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing :
+        return None, f"{source_label} : Missing Columns : {', '.join(missing)}"
+
+    # Copy the DataFrame
+    df = df.copy()
+
+    # 1. Parse the Date column
+    try:
+        df["_Date"] = pd.to_datetime(df[date_col], dayfirst=True, errors="coerce")
+        if df["_Date"].isna().all():
+            return None, f"{source_label} : No valid dates found in '{date_col}'"
+    except Exception as exc :
+        return None, f"{source_label} : Error parsing Date column '{date_col}': {str(exc)}"
+
+    # 2. Parse the Amount column
+    try:
+        df["_Amount"] = pd.to_numeric(df[amount_col], errors="coerce").fillna(0.0)
+    except Exception as exc :
+        return None, f"{source_label} : Error parsing Amount column '{amount_col}': {str(exc)}"
+
+    # 3. Entity and PartnerEntity columns
+    try:
+        df["_Entity"] = df[entity_col].astype(str).str.strip()
+        df["_PartnerEntity"] = df[partner_col].astype(str).str.strip()
+    except Exception as exc :
+        return None, f"{source_label} : Error processing Entity columns: {str(exc)}"
+
+    # 4. Unified Narration Field (lowercase for fuzzy matching)
+    try :
+        narration = [df[c].astype(str).str.strip() for c in narration_cols]
+        df["_Narration"] = (
+            pd.concat(narration, axis=1)
+            .apply(lambda row : " ".join(v for v in row if v not in ("nan", "", "None")), axis=1)
+            .str.lower()
+            .str.strip()
+        )
+    except Exception as exc :
+        return None, f"{source_label} : Error building Narration Field : {str(exc)}"
+
+    # 5. Initialize IC reconciliation columns
+    df["Recon_Status"] = "Unmatched"       # Unmatched, Matched, Review
+    df["Rule_Applied"] = None              # Which rule matched this row
+    df["Recon_ID"] = None                  # Shared ID for matched pairs/groups
+    df["Amt_Diff"] = None                  # Sum of amounts in the reconciliation group
+
+    # Return the clean dataframe
+    return df, None
+
+###----------------------------------------------------------------------------------------------------------------###
 # Utility - serialise/ deserialise dataframe via JSON
 # Convertion of dataframe to JSON serialisable dict
 
@@ -176,4 +268,27 @@ def store_to_df(records : list | None) -> pd.DataFrame | None :
     df = pd.DataFrame(records)
     if "_Date" in df.columns :
       df["_Date"] = pd.to_datetime(df["_Date"], errors = "coerce")
+    return df
+
+
+###----------------------------------------------------------------------------------------------------------------###
+# Utility - Specialized for IC (Inter-Company) Reconciliation
+
+def df_to_store_ic(df : pd.DataFrame) -> dict | None :
+    """Convert IC dataframe to JSON-serializable format, preserving IC-specific fields."""
+    if df is None or df.empty :
+        return None
+    df_copy = df.copy()
+    for col in df_copy.select_dtypes(include=["datetime64[ns]","datetimetz"]).columns :
+        df_copy[col] = df_copy[col].astype(str)
+    return df_copy.to_dict("records")
+
+
+def store_to_df_ic(records : list | None) -> pd.DataFrame | None :
+    """Reconstruct IC dataframe from JSON stored data."""
+    if not records :
+        return None
+    df = pd.DataFrame(records)
+    if "_Date" in df.columns :
+        df["_Date"] = pd.to_datetime(df["_Date"], errors = "coerce")
     return df

@@ -461,8 +461,245 @@ def run_full_reconciliation(
 
     return ledger_df, bank_df, match_log_df, rule_counts
 
+###################################################################################################################
+# INTER-COMPANY RECONCILIATION ENGINE
+
+"""
+Inter-Company (IC) Reconciliation matches transactions between counterparty entities.
+Key differences from Bank Reconciliation:
+    - Amount matching is OFFSET (a + b ≈ 0, not a ≈ b)
+    - Entity/PartnerEntity fields define the counterparty relationship
+    - Unmatched and Matched rows coexist in same DataFrame
+    - Rule priority sequence differs (8 IC-specific rules)
+"""
+
+###----------------------------------------------------------------------------------------------------------------###
+# IC Helper Functions
+
+def _ic_amount_offset_match(amt1: float, amt2: float, tol: float) -> bool:
+    """Check if two amounts offset each other (sum to ~0) within tolerance."""
+    return abs(amt1 + amt2) <= tol
+
+
+def _ic_date_match(d1, d2, days=None) -> bool:
+    """Check if dates match: exact if days=0, within range if days>0, any if days=None."""
+    if days is None:
+        return True
+    d1_ts = pd.Timestamp(d1)
+    d2_ts = pd.Timestamp(d2)
+    return abs((d1_ts - d2_ts).days) <= days
+
+
+def _ic_narration_match(n1, n2, fuzzy=False, threshold=70) -> bool:
+    """Check narration match: exact if fuzzy=False, fuzzy if fuzzy=True, None to skip."""
+    if fuzzy is None:
+        return True
+    if pd.isna(n1) or pd.isna(n2):
+        return False
+    n1_str = str(n1).strip().lower()
+    n2_str = str(n2).strip().lower()
+    if not fuzzy:
+        return n1_str == n2_str
+    return fuzz.partial_ratio(n1_str, n2_str) >= threshold
+
+
+###----------------------------------------------------------------------------------------------------------------###
+# IC Reconciliation Rules (8 sequential rules)
+
+IC_RULES = [
+    {"id": 1, "name": "Narration Exact + Date Exact + Amount Offset", "dt": 0,    "fuzzy": False},
+    {"id": 2, "name": "Narration Fuzzy + Date Exact + Amount Offset", "dt": 0,    "fuzzy": True},
+    {"id": 3, "name": "Narration Exact + Date Range + Amount Offset", "dt": 5,    "fuzzy": False},
+    {"id": 4, "name": "Narration Fuzzy + Date Range + Amount Offset", "dt": 5,    "fuzzy": True},
+    {"id": 5, "name": "Date Exact + Amount Offset",                   "dt": 0,    "fuzzy": None},
+    {"id": 6, "name": "Amount Offset Only",                           "dt": None, "fuzzy": None},
+    {"id": 7, "name": "Within Company Reversal + Amount Offset",      "dt": None, "fuzzy": None},
+    {"id": 8, "name": "Multiple Matchings (Manual Review)",           "dt": None, "fuzzy": None},
+]
+
+
+def run_ic_reconciliation(df: pd.DataFrame, params: dict, enabled_rules: list = None) -> tuple:
+    """
+    Run full Inter-Company reconciliation on a single DataFrame.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Must contain: _Entity, _PartnerEntity, _Amount, _Date, _Narration,
+        Recon_Status, Rule_Applied, Recon_ID
+    params : dict
+        Keys: amount_tolerance, date_tolerance, fuzzy_threshold
+    enabled_rules : list
+        Rule names to enable (all enabled by default)
+
+    Returns
+    -------
+    (reconciled_df, matched_df, unmatched_df, review_df, rule_summary)
+    """
+    if df is None or df.empty:
+        return df, None, None, None, None
+
+    df = df.copy()
+    df.reset_index(drop=True, inplace=True)
+
+    # Extract parameters
+    amt_tol  = float(params.get("amount_tolerance", 2.0))
+    date_tol = int(params.get("date_tolerance", 5))
+    fuzzy_thr= int(params.get("fuzzy_threshold", 70))
+
+    if enabled_rules is None:
+        enabled_rules = [r["name"] for r in IC_RULES]
+
+    recon_id_counter = 1
+
+    # ─────────────────────────────────────────────────────────────
+    # Rules 1-7: Sequential matching
+    # ─────────────────────────────────────────────────────────────
+
+    for rule in IC_RULES[:7]:  # Rules 1-7 (exclude Rule 8 which is special)
+        if rule["name"] not in enabled_rules:
+            continue
+
+        unmatched = df[df["Recon_Status"] == "Unmatched"]
+
+        for i, row in unmatched.iterrows():
+            if df.loc[i, "Recon_Status"] != "Unmatched":
+                continue
+
+            entity   = row["_Entity"]
+            partner  = row["_PartnerEntity"]
+            amt      = row["_Amount"]
+            date_val = row["_Date"]
+            narr     = row["_Narration"]
+
+            # Find counterparty candidates (entity A ↔ entity B swapped relationship)
+            candidates = df[
+                (df["Recon_Status"] == "Unmatched") &
+                (df["_Entity"] == partner) &
+                (df["_PartnerEntity"] == entity) &
+                (df.index != i)
+            ]
+
+            # Also check within-company reversals (same entity pair, opposite direction)
+            same_company = df[
+                (df["Recon_Status"] == "Unmatched") &
+                (df["_Entity"] == entity) &
+                (df["_PartnerEntity"] == partner) &
+                (df.index != i)
+            ]
+
+            candidates = pd.concat([candidates, same_company]).drop_duplicates()
+
+            if candidates.empty:
+                continue
+
+            # Apply rule conditions
+            for j, cand in candidates.iterrows():
+                if df.loc[j, "Recon_Status"] != "Unmatched":
+                    continue
+
+                c_amt  = cand["_Amount"]
+                c_date = cand["_Date"]
+                c_narr = cand["_Narration"]
+
+                # Amount offset check
+                if not _ic_amount_offset_match(amt, c_amt, amt_tol):
+                    continue
+
+                # Skip date/narration for amount-only rule
+                if rule["name"] != "Amount Offset Only":
+                    if not _ic_date_match(date_val, c_date, rule["dt"]):
+                        continue
+                    if not _ic_narration_match(narr, c_narr, rule["fuzzy"], fuzzy_thr):
+                        continue
+
+                # Match found!
+                recon_id = f"REC_{recon_id_counter}"
+                df.loc[[i, j], "Recon_Status"] = "Matched"
+                df.loc[[i, j], "Rule_Applied"] = rule["name"]
+                df.loc[[i, j], "Recon_ID"]     = recon_id
+
+                recon_id_counter += 1
+                break  # Move to next unmatched row
+
+    # ─────────────────────────────────────────────────────────────
+    # Rule 8: Multiple matchings (suggest manual review)
+    # ─────────────────────────────────────────────────────────────
+
+    if "Multiple Matchings (Manual Review)" in enabled_rules:
+        multi_match = df[df["Recon_Status"] == "Unmatched"].copy()
+
+        if not multi_match.empty:
+            multi_match["pair"] = multi_match.apply(
+                lambda x: tuple(sorted([x["_Entity"], x["_PartnerEntity"]])), axis=1
+            )
+
+            for pair, group in multi_match.groupby("pair"):
+                if len(group) >= 2:
+                    total = group["_Amount"].sum()
+                    # If sum ≈ 0 OR complex structure (3+ transactions) → send to review
+                    if abs(total) <= amt_tol or len(group) >= 3:
+                        df.loc[group.index, "Recon_Status"] = "Review"
+                        df.loc[group.index, "Rule_Applied"] = "Multiple Matchings (Manual Review)"
+                        df.loc[group.index, "Recon_ID"]     = f"REC_{recon_id_counter}"
+                        recon_id_counter += 1
+
+    # ─────────────────────────────────────────────────────────────
+    # Calculate amount differences per reconciliation group
+    # ─────────────────────────────────────────────────────────────
+
+    df["Amt_Diff"] = df.groupby("Recon_ID")["_Amount"].transform("sum")
+
+    # ─────────────────────────────────────────────────────────────
+    # Extract results
+    # ─────────────────────────────────────────────────────────────
+
+    matched_df   = df[df["Recon_Status"] == "Matched"].copy()
+    unmatched_df = df[df["Recon_Status"] == "Unmatched"].copy()
+    review_df    = df[df["Recon_Status"] == "Review"].copy()
+
+    # Rule summary
+    if not matched_df.empty:
+        rule_summary = matched_df["Rule_Applied"].value_counts().reset_index()
+        rule_summary.columns = ["Rule_Applied", "Transaction_Count"]
+    else:
+        rule_summary = pd.DataFrame(columns=["Rule_Applied", "Transaction_Count"])
+
+    return df, matched_df, unmatched_df, review_df, rule_summary
+
+
+###----------------------------------------------------------------------------------------------------------------###
+# IC Analysis Functions
+
+def get_ic_entity_matrix(df: pd.DataFrame, status_filter="Matched") -> pd.DataFrame:
+    """
+    Create Entity → PartnerEntity matrix for reconciled transactions.
+    Shows net amounts between entity pairs.
+    """
+    if df is None or df.empty:
+        return None
+
+    if status_filter:
+        filtered = df[df["Recon_Status"] == status_filter].copy()
+    else:
+        filtered = df.copy()
+
+    if filtered.empty:
+        return None
+
+    # Aggregate amounts by entity pair
+    agg = filtered.groupby(["_Entity", "_PartnerEntity"])["_Amount"].sum().reset_index()
+
+    # Pivot to create matrix
+    matrix = agg.pivot(index="_Entity", columns="_PartnerEntity", values="_Amount").fillna(0)
+
+    return matrix
+
+
 ###----------------------------------------------------------------------------------------------------------------###
 # INFERENCES
+
+# Bank Reconciliation Inferences
 
 # Unreconciled Data in Ledger & Bank statement (For inferencing)
 
@@ -484,3 +721,20 @@ def get_manual_review_items(ledger_df: pd.DataFrame, bank_df: pd.DataFrame) -> p
     bank_review.insert(0, "Source", "Bank")
 
     return pd.concat([ledger_review, bank_review], ignore_index=True)
+
+
+###----------------------------------------------------------------------------------------------------------------###
+# INTER-COMPANY INFERENCES
+
+def get_ic_unmatched(df: pd.DataFrame) -> pd.DataFrame:
+    """Get all unmatched IC transactions."""
+    if df is None:
+        return None
+    return df[df["Recon_Status"] == "Unmatched"].copy()
+
+
+def get_ic_review_items(df: pd.DataFrame) -> pd.DataFrame:
+    """Get all IC transactions flagged for manual review."""
+    if df is None:
+        return None
+    return df[df["Recon_Status"] == "Review"].copy()
