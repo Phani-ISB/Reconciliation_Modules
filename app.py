@@ -38,7 +38,7 @@ import dash_bootstrap_components as dbc
 from config import(
     APP_TITLE, APP_PORT, APP_DEBUG, APP_HOST,
     COLOR, RULES_CONFIG, AI_PROVIDERS, AI_DEFAULT_CONFIG,
-    AI_MODEL_SUGGESTIONS, AI_SYSTEM_PROMPT,
+    AI_MODEL_SUGGESTIONS, AI_SYSTEM_PROMPT, AI_IC_SYSTEM_PROMPT,
     DATE_TOLERANCE, AMOUNT_TOLERANCE, FUZZY_THRESHOLD,
 )
 
@@ -52,7 +52,7 @@ from engine import (
 )
 from inferences import (
     compute_totals, compute_reconciliation_summary, compute_currency_summary,
-    compute_amount_diff_summary, build_ai_context
+    compute_amount_diff_summary, build_ai_context, build_ic_ai_context
 )
 from ai_agent import AIAgent
 
@@ -500,6 +500,97 @@ tab_ai_agent = html.Div([
 
 ], style={"padding": "16px"})
 
+###----------------------------------------------------------------------------------------------------------------###
+# IC AI Agent Tab
+
+tab_ic_ai_agent = html.Div([
+    # LLM provider configuration panel
+    card([
+        section_header("🔧 IC AI Agent Configuration"),
+        dbc.Row([
+            dbc.Col([
+                html.Label("Provider", style={"fontSize": "0.82rem", "fontWeight": "600"}),
+                dcc.Dropdown(id="ic-ai-provider", options=[{"label": p, "value": p} for p in AI_PROVIDERS],
+                             value=AI_DEFAULT_CONFIG["provider"],
+                             clearable=False, style={"fontSize": "0.82rem"}),
+            ], width=3),
+            dbc.Col([
+                html.Label("Model", style={"fontSize": "0.82rem", "fontWeight": "600"}),
+                dcc.Input(id="ic-ai-model", value=AI_DEFAULT_CONFIG["model"],
+                          debounce=True, style={"width": "100%", "padding": "6px",
+                                                "borderRadius": "4px",
+                                                "border": f"1px solid {COLOR['border']}"}),
+                html.Small(id="ic-ai-model-hint", style={"color": COLOR["muted"], "fontSize": "0.75rem"}),
+            ], width=3),
+            dbc.Col([
+                html.Label("API Key", style={"fontSize": "0.82rem", "fontWeight": "600"}),
+                dcc.Input(id="ic-ai-apikey", type="password", placeholder="Paste API key here…",
+                          debounce=True, style={"width": "100%", "padding": "6px",
+                                                "borderRadius": "4px",
+                                                "border": f"1px solid {COLOR['border']}"}),
+            ], width=3),
+            dbc.Col([
+                html.Label("Max Tokens", style={"fontSize": "0.82rem", "fontWeight": "600"}),
+                dcc.Input(id="ic-ai-max-tokens", type="number", value=AI_DEFAULT_CONFIG["max_tokens"],
+                          min=100, max=4096, step=100, debounce=True,
+                          style={"width": "100%", "padding": "6px", "borderRadius": "4px",
+                                 "border": f"1px solid {COLOR['border']}"}),
+            ], width=2),
+            dbc.Col([
+                html.Label("Temperature", style={"fontSize": "0.82rem", "fontWeight": "600"}),
+                dcc.Input(id="ic-ai-temperature", type="number",
+                          value=AI_DEFAULT_CONFIG["temperature"],
+                          min=0.0, max=1.0, step=0.05, debounce=True,
+                          style={"width": "100%", "padding": "6px", "borderRadius": "4px",
+                                 "border": f"1px solid {COLOR['border']}"}),
+            ], width=1),
+        ], className="mb-3"),
+        dbc.Row([
+            dbc.Col(dbc.Button("💾 Save & Test Connection", id="ic-btn-test-ai",
+                               color="primary", size="sm"), width="auto"),
+            dbc.Col(html.Div(id="ic-ai-conn-status",
+                             style={"fontSize": "0.84rem", "paddingTop": "6px",
+                                    "fontWeight": "600"}), width="auto"),
+        ]),
+    ]),
+
+    # Chat Interface
+    card([
+        section_header("💬 Chat with IC Reconciliation Data"),
+
+        # Scrollable chat history
+        html.Div(id="ic-chat-history",
+                 style={"height": "380px", "overflowY": "auto",
+                        "border": f"1px solid {COLOR['border']}",
+                        "borderRadius": "6px", "padding": "12px",
+                        "background": COLOR["background"],
+                        "fontSize": "0.86rem", "lineHeight": "1.6",
+                        "marginBottom": "10px"}),
+
+        # Input row
+        dbc.Row([
+            dbc.Col(dcc.Input(id="ic-chat-input",
+                              placeholder="Ask a question about your IC reconciliation…",
+                              debounce=False, n_submit=0,
+                              style={"width": "100%", "padding": "8px 12px",
+                                     "borderRadius": "6px",
+                                     "border": f"1px solid {COLOR['accent']}",
+                                     "fontSize": "0.86rem"}), width=9),
+            dbc.Col(dbc.Button("➤ Send", id="ic-btn-send-chat", color="primary"), width=2),
+            dbc.Col(dbc.Button("🗑 Clear", id="ic-btn-clear-chat", color="secondary",
+                               outline=True), width=1),
+        ], className="g-2"),
+    ]),
+
+    # Option to export the chat results
+    dbc.Row([
+        dbc.Col(dbc.Button("⬇ Export Chat (TXT)", id="ic-btn-export-chat",
+                           color="secondary", size="sm", outline=True), width="auto"),
+        dcc.Download(id="ic-dl-chat"),
+    ], className="mt-2"),
+
+], style={"padding": "16px"})
+
 ###################################################################################################################
 # INTER-COMPANY RECONCILIATION TABS
 
@@ -682,6 +773,8 @@ app.layout = html.Div([
                                     children=tab_rules_ic),
                             dbc.Tab(label="📊  Results",              tab_id="subtab-ic-results",
                                     children=tab_results_ic),
+                            dbc.Tab(label="🤖  AI Agent",             tab_id="subtab-ic-agent",
+                                    children=tab_ic_ai_agent),
                         ], className="mt-0"),
                     ]),
                 ]),
@@ -734,6 +827,9 @@ app.layout = html.Div([
     dcc.Store(id="store-ic-unmatched"),    # unmatched IC transactions
     dcc.Store(id="store-ic-review"),       # IC transactions for review
     dcc.Store(id="store-ic-rule-summary"), # IC rule summary DataFrame
+    dcc.Store(id="store-ic-ai-config"),    # IC AI agent config dict
+    dcc.Store(id="store-ic-chat-history"), # IC chat history list
+    dcc.Store(id="store-ic-ai-context"),   # IC built AI context string
 
 ], style={"fontFamily": "Inter, Segoe UI, sans-serif",
           "background": COLOR["background"], "minHeight": "100vh"})
@@ -885,6 +981,7 @@ def toggle_all_ic_rules(enable_n, disable_n):
     Output("store-ic-unmatched",     "data"),
     Output("store-ic-review",        "data"),
     Output("store-ic-rule-summary",  "data"),
+    Output("store-ic-ai-context",    "data"),
     Output("ic-subtabs",             "active_tab", allow_duplicate=True),
     Output("ic-rules-status",        "children"),
     Input("btn-ic-run-recon", "n_clicks"),
@@ -900,7 +997,7 @@ def run_ic_recon(n_clicks, ic_clean, enabled_rules, date_tol, amt_tol, fuzzy_tol
     if not n_clicks or ic_clean is None:
         err_msg = dbc.Alert("❌ Error: No clean IC data. Please complete data ingestion.",
                             color="danger", style={"fontSize": "0.84rem"})
-        return no_update, no_update, no_update, no_update, no_update, no_update, err_msg
+        return no_update, no_update, no_update, no_update, no_update, no_update, no_update, err_msg
 
     try:
         ic_df = store_to_df_ic(ic_clean)
@@ -914,6 +1011,9 @@ def run_ic_recon(n_clicks, ic_clean, enabled_rules, date_tol, amt_tol, fuzzy_tol
             ic_df, params, enabled_rules
         )
 
+        # Build IC AI context string now so it's ready when user opens IC AI tab
+        ic_context = build_ic_ai_context(matched_df, unmatched_df, review_df, rule_summary, params)
+
         success_msg = dbc.Alert(
             f"✅ Reconciliation complete! {len(matched_df)} matched, {len(unmatched_df)} unmatched, {len(review_df)} for review.",
             color="success", style={"fontSize": "0.84rem", "padding": "8px 12px"}
@@ -925,13 +1025,14 @@ def run_ic_recon(n_clicks, ic_clean, enabled_rules, date_tol, amt_tol, fuzzy_tol
             df_to_store_ic(unmatched_df),
             df_to_store_ic(review_df),
             rule_summary.to_dict("records") if rule_summary is not None else [],
+            ic_context,
             "subtab-ic-results",
             success_msg
         )
     except Exception as exc:
         err_msg = dbc.Alert(f"❌ Error: {str(exc)}", color="danger",
                             style={"fontSize": "0.84rem", "padding": "8px 12px"})
-        return no_update, no_update, no_update, no_update, no_update, no_update, err_msg
+        return no_update, no_update, no_update, no_update, no_update, no_update, no_update, err_msg
 
 
 # IC Results Display
@@ -1563,6 +1664,152 @@ def export_chat(n, history):
         lines.append(f"[{role}]\n{msg['content']}\n")
     text = "\n".join(lines)
     return dcc.send_string(text, "reconciliation_chat.txt")
+
+
+###################################################################################################################
+# IC AI AGENT CALLBACKS
+
+# IC Model hint
+@app.callback(
+    Output("ic-ai-model-hint", "children"),
+    Input("ic-ai-provider", "value"),
+    prevent_initial_call=True,
+)
+def update_ic_model_hint(provider):
+    """Show model name suggestions when the user changes IC AI provider."""
+    hints = AI_MODEL_SUGGESTIONS.get(provider, [])
+    if hints:
+        return "Suggestions: " + " · ".join(hints)
+    return ""
+
+
+# IC Save & Test Connection
+@app.callback(
+    Output("ic-ai-conn-status",  "children"),
+    Output("store-ic-ai-config", "data"),
+    Input("ic-btn-test-ai",      "n_clicks"),
+    State("ic-ai-provider",      "value"),
+    State("ic-ai-apikey",        "value"),
+    State("ic-ai-model",         "value"),
+    State("ic-ai-max-tokens",    "value"),
+    State("ic-ai-temperature",   "value"),
+    prevent_initial_call=True,
+)
+def save_and_test_ic_ai(n, provider, api_key, model, max_tokens, temperature):
+    """Save IC AI config to store and test connection."""
+    if not n: return no_update, no_update
+
+    config = {
+        "provider"     : provider or AI_DEFAULT_CONFIG["provider"],
+        "api_key"      : api_key  or "",
+        "model"        : model    or AI_DEFAULT_CONFIG["model"],
+        "max_tokens"   : int(max_tokens  or 1000),
+        "temperature"  : float(temperature or 0.3),
+        "system_prompt": AI_IC_SYSTEM_PROMPT,
+    }
+
+    agent   = AIAgent(config)
+    ok, msg = agent.test_connection()
+
+    color  = COLOR["success"] if ok else COLOR["danger"]
+    status = html.Span(msg, style={"color": color})
+
+    return status, config if ok else no_update
+
+
+# IC Chat callbacks
+@app.callback(
+    Output("ic-chat-history",       "children"),
+    Output("store-ic-chat-history", "data"),
+    Output("ic-chat-input",         "value"),
+    Input("ic-btn-send-chat",   "n_clicks"),
+    Input("ic-btn-clear-chat",  "n_clicks"),
+    Input("ic-chat-input",      "n_submit"),
+    State("ic-chat-input",           "value"),
+    State("store-ic-chat-history",   "data"),
+    State("store-ic-ai-config",      "data"),
+    State("store-ic-ai-context",     "data"),
+    prevent_initial_call=True,
+)
+def handle_ic_chat(send_n, clear_n, submit_n, user_input, history, ai_config, ai_context):
+    """Send user message to LLM and update IC chat history display."""
+    triggered = ctx.triggered_id
+
+    if triggered == "ic-btn-clear-chat":
+        return [], [], ""
+
+    if not user_input or not user_input.strip():
+        return no_update, no_update, ""
+
+    # Initialise history if first message
+    if not history:
+        history = []
+
+    # Add user message
+    history.append({"role": "user", "content": user_input.strip()})
+
+    # Call LLM
+    if ai_config:
+        try:
+            agent = AIAgent(ai_config)
+            reply = agent.chat(history, context=ai_context or "")
+        except Exception as exc:
+            reply = f"⚠️ Error: {str(exc)}"
+    else:
+        reply = "⚠️ IC AI Agent not configured. Please set your API key in the IC Agent tab and save."
+
+    history.append({"role": "assistant", "content": reply})
+
+    # Build chat HTML display
+    chat_bubbles = []
+    for msg in history:
+        is_user = msg["role"] == "user"
+        bubble  = html.Div([
+            html.Div(
+                "You" if is_user else "🤖 IC Agent",
+                style={"fontSize": "0.72rem", "fontWeight": "700",
+                       "color": COLOR["accent"] if is_user else COLOR["primary"],
+                       "marginBottom": "2px"},
+            ),
+            html.Div(
+                msg["content"],
+                style={
+                    "background": "#dbeafe" if is_user else "#f0fdf4",
+                    "borderRadius": "8px",
+                    "padding": "8px 12px",
+                    "maxWidth": "85%",
+                    "alignSelf": "flex-end" if is_user else "flex-start",
+                    "fontSize": "0.84rem",
+                    "lineHeight": "1.55",
+                    "whiteSpace": "pre-wrap",
+                },
+            ),
+        ], style={
+            "display": "flex",
+            "flexDirection": "column",
+            "alignItems": "flex-end" if is_user else "flex-start",
+            "marginBottom": "12px",
+        })
+        chat_bubbles.append(bubble)
+
+    return chat_bubbles, history, ""
+
+
+# IC Export chat as text
+@app.callback(
+    Output("ic-dl-chat", "data"),
+    Input("ic-btn-export-chat",      "n_clicks"),
+    State("store-ic-chat-history",   "data"),
+    prevent_initial_call=True,
+)
+def export_ic_chat(n, history):
+    if not history: return no_update
+    lines = []
+    for msg in history:
+        role = "YOU" if msg["role"] == "user" else "IC AGENT"
+        lines.append(f"[{role}]\n{msg['content']}\n")
+    text = "\n".join(lines)
+    return dcc.send_string(text, "ic_reconciliation_chat.txt")
 
 
 ###----------------------------------------------------------------------------------------------------------------###

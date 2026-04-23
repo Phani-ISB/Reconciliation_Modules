@@ -227,14 +227,20 @@ def preprocess_ic(df : pd.DataFrame, mapping : dict, source_label: str = "Data")
         return None, f"{source_label} : Error processing Entity columns: {str(exc)}"
 
     # 4. Unified Narration Field (lowercase for fuzzy matching)
+    
     try :
-        narration = [df[c].astype(str).str.strip() for c in narration_cols]
         df["_Narration"] = (
-            pd.concat(narration, axis=1)
-            .apply(lambda row : " ".join(v for v in row if v not in ("nan", "", "None")), axis=1)
+            df[narration_cols]
+            .fillna("")
+            .apply(lambda row: " ".join(
+                str(v).strip()
+                for v in row
+                if pd.notna(v) and str(v).strip().lower() not in ("", "nan", "none")
+            ), axis=1)
             .str.lower()
+            .str.replace(r"\s+", " ", regex=True)
             .str.strip()
-        )
+        ) 
     except Exception as exc :
         return None, f"{source_label} : Error building Narration Field : {str(exc)}"
 
