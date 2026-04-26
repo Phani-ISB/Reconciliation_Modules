@@ -434,7 +434,11 @@ def run_full_reconciliation(
 # Copy the ledger and bank dataframes
     ledger_df = ledger_df.copy()
     bank_df   = bank_df.copy()
-
+# Ensure the intactness of amount and date format before running reconciliation    
+    ledger_df["_Amount"] = pd.to_numeric(ledger_df["_Amount"], errors="coerce")
+    bank_df["_Amount"]   = pd.to_numeric(bank_df["_Amount"], errors="coerce")
+    ledger_df["_Date"] = pd.to_datetime(ledger_df["_Date"], errors="coerce")
+    bank_df["_Date"]   = pd.to_datetime(bank_df["_Date"], errors="coerce")
     all_match_logs = []
     gid = 1
 
