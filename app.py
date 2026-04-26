@@ -17,6 +17,7 @@
 import numpy as np
 import pandas as pd
 import io
+import os
 import json
 import base64
 import traceback
@@ -343,7 +344,17 @@ def _df_to_assign_table(df, table_id):
 
 ###----------------------------------------------------------------------------------------------------------------###
 # HELP File
+# Import help section from help.md file text
+def load_help_text():
+    try:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+        file_path = os.path.join(base_path, "help.md")
 
+        with open(file_path, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception as e:
+        return f"⚠️ Unable to load help file:\n\n{str(e)}"
+               
 help_modal = dbc.Modal([
     dbc.ModalHeader(dbc.ModalTitle("Help & Credits"), close_button=True),
     dbc.ModalBody([
@@ -353,69 +364,14 @@ help_modal = dbc.Modal([
     dbc.ModalFooter(dbc.Button("Close", id="help-close", color="secondary")),
 ], id="help-modal", size="lg", is_open=False)
 
-HELP_TEXT = """
-## Reconciliation Modules — Help & Credits
-
-### How to Use
-1. **Data Ingestion tab** — Upload your Ledger and Bank Statement files (CSV / XLS / XLSX).
-   Map the **Date**, **Amount**, and **Narration** columns for each file.
-   Click **Proceed to Rules**.
-
-2. **Rules & Configuration tab** — Select which reconciliation rules to apply.
-   Tune the **Date Tolerance**, **Amount Tolerance**, and **Fuzzy Threshold** KPIs.
-   Click **Run Reconciliation**.
-
-3. **Results tab** — View matched/unmatched transactions, rule breakdowns,
-   donut chart, and download the reconciled sheets as Excel or CSV.
-
-4. **Manual Review tab** — Review group-matched transactions (Many-to-One / One-to-Many).
-   Accept to confirm or Reject to return to Unmatched. Use **Manual Assign** sub-tab
-   to manually link unmatched rows into a group.
-
-5. **AI Agent tab** — Configure your LLM provider and API key, then ask questions
-   about your reconciliation results in plain English.
-
----
-
-### Reconciliation Rules (in priority order)
-| Rule | Description |
-|------|-------------|
-| Duplicate Detection | Removes exact duplicate rows within each dataset |
-| Narration Exact | Exact narration text match |
-| Narration Exact/Fuzzy | Exact OR fuzzy text match (score ≥ threshold) |
-| Narration + Date Exact | Exact narration + same date |
-| Narration + Date Range | Exact narration + date within tolerance |
-| Narration Fuzzy + Date Range | Fuzzy narration + date within tolerance |
-| Date Exact | Same date (any narration) |
-| Date Range | Date within tolerance (widest net) |
-| Many-to-One | Several ledger lines sum to one bank line |
-| One-to-Many | One ledger line equals several bank lines summed |
-
----
-
-### Manual Review — Accept / Reject
-- **Accept** → group keeps Matched = True, Rule updated to "Matched (Reviewed)".
-- **Reject** → group rows return to Unmatched, GroupID cleared.
-
-### Manual Assign
-- Tick one or more rows from the Unmatched Ledger table AND the Unmatched Bank table.
-- Click **Assign Selected as Group** — they receive the next available GroupID
-  with Rule = "Manual Assignment" and Matched = True.
-
----
-
-### Supported LLM Providers
-OpenAI · Anthropic (Claude) · Groq · Google Gemini
-
----
-
-### Credits
-**Project:** Reconciliation Automation Platform  
-**Organisation:** BHEL / ISB · **Collaboration:** EY (Ernst & Young)
-
----
-*Version 2.0 — Built with Plotly Dash*
-"""
+@app.callback(
+    Output("help-content", "children"),
+    Input("help-modal", "is_open")
+)
+def update_help_content(is_open):
+    if is_open:
+        return load_help_text()
+    return no_update
 
 ###----------------------------------------------------------------------------------------------------------------###
 # Data Ingestion Tab
