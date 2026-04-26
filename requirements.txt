@@ -1,0 +1,24 @@
+
+# requirements.txt  —  Reconciliation Modules
+# Install everything at once: pip install -r requirements.txt
+
+# Core Dashboard Framework (Dash)
+dash>=2.14.0
+dash-bootstrap-components>=1.5.0
+
+# Data & Charts/Visuals
+pandas>=2.0.0
+numpy>=1.24.0
+plotly>=5.18.0
+openpyxl>=3.1.0          # read/write .xlsx files
+xlrd>=2.0.1              # read legacy .xls files
+rapidfuzz>=3.0.0         # fast fuzzy string matching
+
+# Use it For deplyoying Flask server online
+gunicorn
+
+# ── LLM providers (install only what you need) ───────────────
+#openai>=1.0.0
+#anthropic>=0.20.0
+groq>=0.5.0
+#google-generativeai>=0.5.0
