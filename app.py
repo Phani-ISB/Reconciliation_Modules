@@ -430,6 +430,32 @@ tab_data_ingestion = html.Div([
         dbc.Col(upload_block("📁 Ledger File",         "upload-ledger", "preview-ledger"), width=6),
         dbc.Col(upload_block("📁 Bank Statement File", "upload-bank",   "preview-bank"),   width=6),
     ]),
+    card([
+        dbc.Row([
+            dbc.Col(
+                dbc.Button(
+                    [html.I(className="fa fa-magic me-2"), "Auto-Map Columns"],
+                    id="btn-auto-map-bank",
+                    color="info", size="sm", outline=True,
+                    style={"fontWeight": "600"},
+                ),
+                width="auto",
+            ),
+            dbc.Col(
+                html.Small(
+                    "Uses the configured AI Agent to intelligently map column headers "
+                    "to Date, Amount, and Narration fields.",
+                    style={"color": COLOR["muted"]},
+                ),
+                width="auto",
+            ),
+            dbc.Col(
+                html.Div(id="auto-map-bank-status",
+                         style={"fontSize": "0.82rem", "fontWeight": "600"}),
+                width="auto",
+            ),
+        ], align="center"),
+    ], style={"padding": "10px 14px", "marginBottom": "4px"}),
     mapping_block("Ledger",         "ledger-date", "ledger-amount", "ledger-narration"),
     mapping_block("Bank Statement", "bank-date",   "bank-amount",   "bank-narration"),
     html.Div(id="mapping-status", style={"marginBottom": "8px"}),
@@ -793,6 +819,32 @@ tab_data_ingestion_ic = html.Div([
     dbc.Row([
         dbc.Col(upload_block("📄 IC Master Data File", "upload-ic", "preview-ic"), width=12),
     ]),
+    card([
+        dbc.Row([
+            dbc.Col(
+                dbc.Button(
+                    [html.I(className="fa fa-magic me-2"), "Auto-Map Columns"],
+                    id="btn-auto-map-ic",
+                    color="info", size="sm", outline=True,
+                    style={"fontWeight": "600"},
+                ),
+                width="auto",
+            ),
+            dbc.Col(
+                html.Small(
+                    "Uses the configured IC AI Agent to intelligently map column headers "
+                    "to Date, Amount, Narration, Entity, and Partner Entity fields.",
+                    style={"color": COLOR["muted"]},
+                ),
+                width="auto",
+            ),
+            dbc.Col(
+                html.Div(id="auto-map-ic-status",
+                         style={"fontSize": "0.82rem", "fontWeight": "600"}),
+                width="auto",
+            ),
+        ], align="center"),
+    ], style={"padding": "10px 14px", "marginBottom": "4px"}),
     mapping_block("IC Data", "ic-date", "ic-amount", "ic-narration"),
     dbc.Row([
         dbc.Col([
@@ -2169,6 +2221,196 @@ def ic_accept_all(n_clicks, ids):
     if not n_clicks or not ids:
         return no_update
     return ["accepted"] * len(ids)
+
+
+###################################################################################################################
+# AUTO-MAP COLUMNS CALLBACKS
+
+# ── Helper : call AIAgent and parse the JSON mapping response ─────────────
+
+def _run_auto_map(ai_config: dict, prompt: str) -> dict | None:
+    import json as _json, re as _re
+    agent = AIAgent(ai_config)
+    raw   = agent.chat([{"role": "user", "content": prompt}], context="")
+    cleaned = _re.sub(r"```(?:json)?", "", raw).strip().strip("`").strip()
+    return _json.loads(cleaned)
+
+
+# ── Bank Reconciliation : Auto-Map ────────────────────────────────────────
+
+@app.callback(
+    Output("ledger-date",           "value"),
+    Output("ledger-amount",         "value"),
+    Output("ledger-narration",      "value"),
+    Output("bank-date",             "value"),
+    Output("bank-amount",           "value"),
+    Output("bank-narration",        "value"),
+    Output("auto-map-bank-status",  "children"),
+    Input("btn-auto-map-bank",  "n_clicks"),
+    State("store-ledger-cols",  "data"),
+    State("store-bank-cols",    "data"),
+    State("store-ai-config",    "data"),
+    prevent_initial_call=True,
+)
+def auto_map_bank_columns(n_clicks, ledger_cols, bank_cols, ai_config):
+    if not n_clicks:
+        return (no_update,) * 7
+
+    if not ai_config:
+        status = html.Span(
+            "\u26a0\ufe0f LLM connection not established. Configure and test the AI Agent in the 'AI Agent' tab first.",
+            style={"color": COLOR["danger"]},
+        )
+        return (no_update,) * 6 + (status,)
+
+    if not ledger_cols and not bank_cols:
+        status = html.Span(
+            "\u26a0\ufe0f No files loaded. Upload the Ledger and/or Bank Statement files first.",
+            style={"color": COLOR["warning"]},
+        )
+        return (no_update,) * 6 + (status,)
+
+    ledger_header_list = [c["value"] for c in (ledger_cols or [])]
+    bank_header_list   = [c["value"] for c in (bank_cols   or [])]
+
+    prompt = (
+        "You are a column mapping assistant for financial reconciliation.\n\n"
+        f"LEDGER file columns: {ledger_header_list}\n"
+        f"BANK STATEMENT file columns: {bank_header_list}\n\n"
+        "Map column headers to these fields:\n"
+        "  ledger_date      - transaction date column in Ledger\n"
+        "  ledger_amount    - debit/credit/amount column in Ledger\n"
+        "  ledger_narration - description/narration column(s) in Ledger (list)\n"
+        "  bank_date        - transaction/value date column in Bank Statement\n"
+        "  bank_amount      - debit/credit/amount column in Bank Statement\n"
+        "  bank_narration   - description/narration column(s) in Bank Statement (list)\n\n"
+        "Rules:\n"
+        "- Use EXACT column names (case-sensitive).\n"
+        "- Return ONLY a valid JSON object, no explanation, no markdown.\n"
+        "- Use null for any field you cannot confidently determine.\n"
+        "- narration fields must always be a list.\n\n"
+        'Example: {"ledger_date":"Transaction Date","ledger_amount":"Amount","ledger_narration":["Description"],'
+        '"bank_date":"Value Date","bank_amount":"Debit","bank_narration":["Particulars"]}'
+    )
+
+    try:
+        mapping = _run_auto_map(ai_config, prompt)
+    except Exception as exc:
+        status = html.Span(f"\u274c Auto-mapping failed: {str(exc)}", style={"color": COLOR["danger"]})
+        return (no_update,) * 6 + (status,)
+
+    if not mapping:
+        status = html.Span("\u274c AI returned an empty or invalid response.", style={"color": COLOR["danger"]})
+        return (no_update,) * 6 + (status,)
+
+    valid_ledger = set(ledger_header_list)
+    valid_bank   = set(bank_header_list)
+
+    def pick(val, valid_set):
+        if isinstance(val, list):
+            result = [v for v in val if v in valid_set]
+            return result if result else no_update
+        return val if val in valid_set else no_update
+
+    l_date   = pick(mapping.get("ledger_date"),      valid_ledger)
+    l_amount = pick(mapping.get("ledger_amount"),     valid_ledger)
+    l_narr   = pick(mapping.get("ledger_narration"),  valid_ledger)
+    b_date   = pick(mapping.get("bank_date"),         valid_bank)
+    b_amount = pick(mapping.get("bank_amount"),       valid_bank)
+    b_narr   = pick(mapping.get("bank_narration"),    valid_bank)
+
+    mapped_count = sum(1 for v in [l_date, l_amount, l_narr, b_date, b_amount, b_narr]
+                       if v is not no_update)
+    status = html.Span(
+        f"\u2705 Auto-mapping complete \u2014 {mapped_count}/6 fields mapped successfully.",
+        style={"color": COLOR["success"]},
+    )
+    return l_date, l_amount, l_narr, b_date, b_amount, b_narr, status
+
+
+# ── IC Reconciliation : Auto-Map ──────────────────────────────────────────
+
+@app.callback(
+    Output("ic-date",              "value"),
+    Output("ic-amount",            "value"),
+    Output("ic-narration",         "value"),
+    Output("ic-entity",            "value"),
+    Output("ic-partner",           "value"),
+    Output("auto-map-ic-status",   "children"),
+    Input("btn-auto-map-ic",    "n_clicks"),
+    State("store-ic-cols",      "data"),
+    State("store-ic-ai-config", "data"),
+    prevent_initial_call=True,
+)
+def auto_map_ic_columns(n_clicks, ic_cols, ai_config):
+    if not n_clicks:
+        return (no_update,) * 6
+
+    if not ai_config:
+        status = html.Span(
+            "\u26a0\ufe0f LLM connection not established. Configure and test the IC AI Agent in the 'IC AI Agent' tab first.",
+            style={"color": COLOR["danger"]},
+        )
+        return (no_update,) * 5 + (status,)
+
+    if not ic_cols:
+        status = html.Span(
+            "\u26a0\ufe0f No IC file loaded. Upload the IC Master Data file first.",
+            style={"color": COLOR["warning"]},
+        )
+        return (no_update,) * 5 + (status,)
+
+    ic_header_list = [c["value"] for c in ic_cols]
+
+    prompt = (
+        "You are a column mapping assistant for Inter-Company (IC) reconciliation.\n\n"
+        f"IC Master Data file columns: {ic_header_list}\n\n"
+        "Map column headers to these five fields:\n"
+        "  date           - transaction/posting date column\n"
+        "  amount         - debit/credit/transaction amount column\n"
+        "  narration      - description/narration/text column(s) (list)\n"
+        "  entity         - company code / entity column (the reporting entity)\n"
+        "  partner_entity - counter-party / trading partner column\n\n"
+        "Rules:\n"
+        "- Use EXACT column names (case-sensitive).\n"
+        "- Return ONLY a valid JSON object, no explanation, no markdown.\n"
+        "- Use null for any field you cannot confidently determine.\n"
+        "- narration must always be a list.\n\n"
+        'Example: {"date":"Posting Date","amount":"Amount in LC","narration":["Text","Assignment"],'
+        '"entity":"Company Code","partner_entity":"Trading Partner"}'
+    )
+
+    try:
+        mapping = _run_auto_map(ai_config, prompt)
+    except Exception as exc:
+        status = html.Span(f"\u274c Auto-mapping failed: {str(exc)}", style={"color": COLOR["danger"]})
+        return (no_update,) * 5 + (status,)
+
+    if not mapping:
+        status = html.Span("\u274c AI returned an empty or invalid response.", style={"color": COLOR["danger"]})
+        return (no_update,) * 5 + (status,)
+
+    valid = set(ic_header_list)
+
+    def pick(val, valid_set):
+        if isinstance(val, list):
+            result = [v for v in val if v in valid_set]
+            return result if result else no_update
+        return val if val in valid_set else no_update
+
+    ic_date    = pick(mapping.get("date"),           valid)
+    ic_amount  = pick(mapping.get("amount"),         valid)
+    ic_narr    = pick(mapping.get("narration"),      valid)
+    ic_entity  = pick(mapping.get("entity"),         valid)
+    ic_partner = pick(mapping.get("partner_entity"), valid)
+
+    mapped_count = sum(1 for v in [ic_date, ic_amount, ic_narr, ic_entity, ic_partner]
+                       if v is not no_update)
+    status = html.Span(
+        f"\u2705 Auto-mapping complete \u2014 {mapped_count}/5 fields mapped successfully.",
+        style={"color": COLOR["success"]},
+    )
+    return ic_date, ic_amount, ic_narr, ic_entity, ic_partner, status
 
 
 ###----------------------------------------------------------------------------------------------------------------###
